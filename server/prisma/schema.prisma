@@ -1,0 +1,142 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String             @id @default(uuid())
+  email             String             @unique
+  name              String?
+  pictureUrl        String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  accounts          ConnectedAccount[]
+  transfers         Transfer[]
+  subscriptions     Subscription[]
+  payments          Payment[]
+  logs              Log[]
+  notifications     Notification[]
+}
+
+model ConnectedAccount {
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id])
+  provider       String    // "GOOGLE_DRIVE", "ONEDRIVE", etc.
+  providerUserId String    // ID from the provider
+  email          String
+  tokenVaultRef  String    // Reference to encrypted token in secret manager/KMS
+  scopesGranted  String[]  
+  lastSyncedAt   DateTime?
+  storageUsed    BigInt?
+  storageLimit   BigInt?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  sourceTransfers      Transfer[] @relation("SourceAccount")
+  destinationTransfers Transfer[] @relation("DestinationAccount")
+}
+
+model Transfer {
+  id                   String           @id @default(uuid())
+  userId               String
+  user                 User             @relation(fields: [userId], references: [id])
+  sourceAccountId      String
+  sourceAccount        ConnectedAccount @relation("SourceAccount", fields: [sourceAccountId], references: [id])
+  destinationAccountId String
+  destinationAccount   ConnectedAccount @relation("DestinationAccount", fields: [destinationAccountId], references: [id])
+  status               String           // PENDING, IN_PROGRESS, COMPLETED, FAILED, CANCELLED
+  totalFiles           Int              @default(0)
+  totalBytes           BigInt           @default(0)
+  transferredBytes     BigInt           @default(0)
+  options              Json             // move, copy, deleteSource, skipExisting, etc.
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  startedAt            DateTime?
+  completedAt          DateTime?
+
+  files TransferFile[]
+  jobs  TransferJob[]
+}
+
+model TransferFile {
+  id                String   @id @default(uuid())
+  transferId        String
+  transfer          Transfer @relation(fields: [transferId], references: [id])
+  sourceFileId      String
+  destinationFileId String?
+  fileName          String
+  path              String   // original path to preserve folder structure
+  size              BigInt
+  mimeType          String?
+  status            String   // PENDING, IN_PROGRESS, COMPLETED, FAILED, SKIPPED
+  md5ChecksumSource String?
+  md5ChecksumDest   String?
+  uploadSessionUri  String?
+  lastByteOffset    BigInt   @default(0)
+  errorReason       String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model TransferJob {
+  id             String   @id @default(uuid()) // Maps to BullMQ job ID
+  transferId     String
+  transfer       Transfer @relation(fields: [transferId], references: [id])
+  jobType        String   // e.g., "FILE_TRANSFER", "FOLDER_DISCOVERY"
+  status         String   // QUEUED, ACTIVE, COMPLETED, FAILED, DELAYED
+  retryCount     Int      @default(0)
+  workerId       String?  // ID of the worker processing this job
+  payload        Json     // Arbitrary data (e.g., file details)
+  errorLogs      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Subscription {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  plan      String   // FREE, PRO, ENTERPRISE
+  status    String   // ACTIVE, CANCELLED, PAST_DUE
+  startDate DateTime @default(now())
+  endDate   DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Payment {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  amount        Int      // in cents/paise
+  currency      String
+  status        String   // SUCCESS, PENDING, FAILED
+  gateway       String   // RAZORPAY, STRIPE
+  transactionId String?
+  createdAt     DateTime @default(now())
+}
+
+model Log {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String
+  details   Json?
+  createdAt DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  type      String   // TRANSFER_COMPLETE, BILLING, SYSTEM
+  createdAt DateTime @default(now())
+}
